@@ -23,88 +23,110 @@ st.markdown("""
     }
 
     .block-container {
-        padding-top: 2rem;
+        padding-top: 1.5rem;
         padding-bottom: 2rem;
         padding-left: 0.5rem;
         padding-right: 0.5rem;
         max-width: 600px;
     }
-    
-    /* スマホ画面（狭い画面）でも年と月のプルダウンを強制的に1行に横並びにする設定 */
+
+    /* スマホなどでプルダウンを綺麗に横並びにする設定 */
     @media (max-width: 768px) {
         [data-testid="stHorizontalBlock"] {
             display: flex !important;
             flex-direction: row !important;
             flex-wrap: nowrap !important;
             align-items: center !important;
-            margin-top: 8px !important;
         }
         [data-testid="stHorizontalBlock"] > div {
             flex: 1 1 auto !important;
             min-width: 0 !important;
         }
     }
-    
-    /* 3箇所のプルダウンの文字サイズをまとめて変更するCSS */
-    [data-testid="stSelectbox"] div[data-baseweb="select"] span {
-        font-size: 20px !important;
-        font-weight: bold !important;
-    }
-    div[data-baseweb="popover"] span {
-        font-size: 16px !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 🔄 自動データ取得・更新ロジック ---
+# --- 🔄 自動データ取得・更新ロジック（スマート自動更新版） ---
 def check_and_update():
     daily_path = "weather_daily.parquet"
     hourly_path = "weather_hourly.parquet"
     
-    # ファイルが存在しない場合は自動でAPIから取得して作成する
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    
     if not os.path.exists(daily_path) or not os.path.exists(hourly_path):
         st.info("🔄 気象データファイルが見つかりません。自動でデータを取得しています...")
-        
-        # 緯度・経度の設定
-        LAT = 32.826687
-        LON = 129.884194
-        start_date = "2015-01-01"
-        end_date = datetime.now().strftime("%Y-%m-%d")
-        
-        url = f"https://archive-api.open-meteo.com/v1/archive?latitude={LAT}&longitude={LON}&start_date={start_date}&end_date={end_date}&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&wind_speed_unit=ms"
-        
+        fetch_and_save_data("2015-01-01", today_str, daily_path, hourly_path, is_init=True)
+    else:
         try:
-            response = requests.get(url)
-            data = response.json()
+            df_daily_check = pd.read_parquet(daily_path)
+            last_date_str = str(pd.to_datetime(df_daily_check["time"].max()).strftime("%Y-%m-%d"))
             
-            if "daily" in data:
-                daily_df = pd.DataFrame({
-                    "time": pd.to_datetime(data["daily"]["time"]).date,
-                    "temperature_2m_max": data["daily"]["temperature_2m_max"],
-                    "temperature_2m_min": data["daily"]["temperature_2m_min"],
-                    "precipitation_sum": data["daily"].get("precipitation_sum", 0)
-                })
-                daily_df.to_parquet(daily_path, index=False)
+            if last_date_str < today_str:
+                st.info("🔄 最新の気象データを更新しています...")
+                fetch_and_save_data(last_date_str, today_str, daily_path, hourly_path, is_init=False)
+        except Exception:
+            fetch_and_save_data("2015-01-01", today_str, daily_path, hourly_path, is_init=True)
+
+def fetch_and_save_data(start_date, end_date, daily_path, hourly_path, is_init=False):
+    LAT = 32.826687
+    LON = 129.884194
+    
+    # 正しい風速単位パラメータ（windspeed_unit=ms）を使用
+    url = f"https://archive-api.open-meteo.com/v1/archive?latitude={LAT}&longitude={LON}&start_date={start_date}&end_date={end_date}&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&windspeed_unit=ms"
+    
+    try:
+        response = requests.get(url)
+        data = response.json()
+        
+        if "daily" in data:
+            new_daily_df = pd.DataFrame({
+                "time": pd.to_datetime(data["daily"]["time"]).date,
+                "temperature_2m_max": data["daily"]["temperature_2m_max"],
+                "temperature_2m_min": data["daily"]["temperature_2m_min"],
+                "precipitation_sum": data["daily"].get("precipitation_sum", 0)
+            })
+            
+            if not is_init and os.path.exists(daily_path):
+                old_df = pd.read_parquet(daily_path)
+                daily_df = pd.concat([old_df, new_daily_df]).drop_duplicates(subset=["time"]).sort_values("time").reset_index(drop=True)
+            else:
+                daily_df = new_daily_df
                 
-            if "hourly" in data:
-                hourly_df = pd.DataFrame({
-                    "time": pd.to_datetime(data["hourly"]["time"]),
-                    "temperature_2m": data["hourly"]["temperature_2m"],
-                    "precipitation": data["hourly"]["precipitation"],
-                    "weather_code": data["hourly"]["weather_code"],
-                    "wind_speed_10m": data["hourly"].get("wind_speed_10m", 0)
-                })
-                hourly_df.to_parquet(hourly_path, index=False)
+            daily_df.to_parquet(daily_path, index=False)
+            
+        if "hourly" in data:
+            new_hourly_df = pd.DataFrame({
+                "time": pd.to_datetime(data["hourly"]["time"]),
+                "temperature_2m": data["hourly"]["temperature_2m"],
+                "precipitation": data["hourly"]["precipitation"],
+                "weather_code": data["hourly"]["weather_code"],
+                "wind_speed_10m": data["hourly"].get("wind_speed_10m", 0)
+            })
+            
+            if not is_init and os.path.exists(hourly_path):
+                old_df = pd.read_parquet(hourly_path)
+                hourly_df = pd.concat([old_df, new_hourly_df]).drop_duplicates(subset=["time"]).sort_values("time").reset_index(drop=True)
+            else:
+                hourly_df = new_hourly_df
                 
-            st.success("✨ 気象データの取得が完了しました！")
-        except Exception as e:
-            st.error(f"⚠️ 気象データの自動取得に失敗しました: {e}")
+            hourly_df.to_parquet(hourly_path, index=False)
+            
+        if is_init:
+            st.success("✨ 2015年からの気象データの初期取得が完了しました！")
+    except Exception as e:
+        st.error(f"⚠️ 気象データの取得に失敗しました: {e}")
 
 check_and_update()
 
 # --- セッション状態の初期化 ---
 if "selected_day" not in st.session_state:
     st.session_state["selected_day"] = 1
+
+if "current_year" not in st.session_state:
+    st.session_state["current_year"] = datetime.now().year
+
+if "current_month" not in st.session_state:
+    st.session_state["current_month"] = datetime.now().month
 
 # URLのクエリパラメータから選択日を取得（カレンダー連動用）
 query_params = st.query_params
@@ -116,20 +138,45 @@ if "day" in query_params:
     except ValueError:
         pass
 
-# --- 1. タイトル と 「年」「月」のプルダウン ---
-col_title, col_year, col_month = st.columns([1.5, 1.05, 1.05])
+# --- 1. タイトル と 年月選択プルダウン（横並び） ---
+st.markdown("<h1 style='font-size: 20px; margin-bottom: 5px;'>☀️ 天気日記</h1>", unsafe_allow_html=True)
 
-with col_title:
-    st.markdown("<div style='display: flex; align-items: center; height: 40px;'><h1 style='margin: 0; font-size: 19px;'>☀️ 天気日記</h1></div>", unsafe_allow_html=True)
+col_y, col_m = st.columns(2)
 
-with col_year:
-    available_years = list(range(2026, 2014, -1))
-    year = st.selectbox("年", available_years, index=0, label_visibility="collapsed")
+with col_y:
+    available_years = list(range(datetime.now().year, 2014, -1))
+    current_year = st.session_state["current_year"]
+    year_index = available_years.index(current_year) if current_year in available_years else 0
+    
+    selected_year = st.selectbox(
+        "年",
+        available_years,
+        index=year_index,
+        format_func=lambda x: f"{x}年",
+        label_visibility="collapsed"
+    )
 
-with col_month:
+with col_m:
     available_months = list(range(1, 13))
-    default_month_idx = datetime.now().month - 1 if year == 2026 else 0
-    month = st.selectbox("月", available_months, index=default_month_idx, format_func=lambda x: f"{x}月", label_visibility="collapsed")
+    current_month = st.session_state["current_month"]
+    month_index = available_months.index(current_month) if current_month in available_months else 0
+    
+    selected_month = st.selectbox(
+        "月",
+        available_months,
+        index=month_index,
+        format_func=lambda x: f"{x}月",
+        label_visibility="collapsed"
+    )
+
+if selected_year != st.session_state["current_year"] or selected_month != st.session_state["current_month"]:
+    st.session_state["current_year"] = selected_year
+    st.session_state["current_month"] = selected_month
+    st.session_state["selected_day"] = 1
+    st.rerun()
+
+year = st.session_state["current_year"]
+month = st.session_state["current_month"]
 
 st.write("") 
 
@@ -253,7 +300,6 @@ for d in range(1, last_day + 1):
         else:
             temp_str = ""
 
-    # 選択中のカードに id="selected-card" を付与してJSから中央寄せできるようにする
     card_id_attr = "id='selected-card'" if is_selected else ""
 
     calendar_cards_html += f"""
@@ -266,7 +312,6 @@ for d in range(1, last_day + 1):
     </div>
     """
 
-# 💡 読み込み時に選択された日（#selected-card）が画面中央にスクロールするJavaScriptを組込
 cal_scroll_container = f"""
 <html>
 <head>
@@ -302,7 +347,6 @@ cal_scroll_container = f"""
             const selectedCard = document.getElementById('selected-card');
             const container = document.getElementById('calendarContainer');
             if (selectedCard && container) {{
-                // カードの位置を計算してコンテナの中央にスクロールさせる
                 const scrollLeftPos = selectedCard.offsetLeft - (container.clientWidth / 2) + (selectedCard.clientWidth / 2);
                 container.scrollLeft = scrollLeftPos;
             }}
@@ -319,8 +363,8 @@ st.markdown("---")
 st.markdown("<div style='margin: -25px 0 0 0;'></div>", unsafe_allow_html=True)
 
 # --- 3. 選択された日の詳細タイムライン ---
-col_label, col_select = st.columns([2.2, 0.8])
-with col_label:
+col_label_t, col_select = st.columns([2.2, 0.8])
+with col_label_t:
     st.markdown("<div style='padding-top: 5px; font-weight: bold; font-size: 16px;'>⏱️ 時間別の詳細:</div>", unsafe_allow_html=True)
 
 with col_select:
@@ -359,6 +403,7 @@ if not day_df.empty:
         if pd.isna(wind_speed):
             wind_speed = 0
         
+        # 💧 降水量・風速マーク付き
         cards_html += f"""
         <div style='flex: 0 0 95px; height: 155px; border: 1px solid #ccc; border-radius: 8px; text-align: center; padding: 4px 2px; background-color: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); font-family: sans-serif;'>
             <div style='font-size: 22px; font-weight: bold; color: #444;'>{hour_str}</div>
