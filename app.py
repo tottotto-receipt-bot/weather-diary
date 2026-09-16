@@ -37,6 +37,7 @@ st.markdown("""
             flex-direction: row !important;
             flex-wrap: nowrap !important;
             align-items: center !important;
+            margin-top: 8px !important;
         }
         [data-testid="stHorizontalBlock"] > div {
             flex: 1 1 auto !important;
@@ -46,7 +47,7 @@ st.markdown("""
     
     /* 3箇所のプルダウンの文字サイズをまとめて変更するCSS */
     [data-testid="stSelectbox"] div[data-baseweb="select"] span {
-        font-size: 18px !important;
+        font-size: 20px !important;
         font-weight: bold !important;
     }
     div[data-baseweb="popover"] span {
@@ -67,10 +68,10 @@ def check_and_update():
         # 緯度・経度の設定
         LAT = 32.826687
         LON = 129.884194
-        start_date = "2023-01-01"
+        start_date = "2015-01-01"
         end_date = datetime.now().strftime("%Y-%m-%d")
         
-        url = f"https://archive-api.open-meteo.com/v1/archive?latitude={LAT}&longitude={LON}&start_date={start_date}&end_date={end_date}&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto"
+        url = f"https://archive-api.open-meteo.com/v1/archive?latitude={LAT}&longitude={LON}&start_date={start_date}&end_date={end_date}&hourly=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&wind_speed_unit=ms"
         
         try:
             response = requests.get(url)
@@ -234,8 +235,8 @@ for d in range(1, last_day + 1):
         pm_mark = "-"
         temp_str = ""
     else:
-        am_mark = am_dict.get(target_date, "☀️")
-        pm_mark = pm_dict.get(target_date, "☀️")
+        am_mark = am_dict.get(target_date, "-")
+        pm_mark = pm_dict.get(target_date, "-")
         
         max_t = max_temp_dict.get(target_date, "")
         min_t = min_temp_dict.get(target_date, "")
@@ -363,8 +364,8 @@ if not day_df.empty:
             <div style='font-size: 22px; font-weight: bold; color: #444;'>{hour_str}</div>
             <div style='font-size: 36px; margin: 2px 0;'>{emoji}</div>
             <div style='font-size: 22px; font-weight: bold; color: #d9534f;'>{temp}°C</div>
-            <div style='font-size: 18px; color: #0275d8; margin-top: 1px;'>{precip}mm</div>
-            <div style='font-size: 16px; color: #555; margin-top: 2px; border-top: 1px dashed #eee; padding-top: 2px;'>💨 {wind_speed:.1f}m/s</div>
+            <div style='font-size: 18px; color: #0275d8; margin-top: 1px;'>💧{precip}mm</div>
+            <div style='font-size: 18px; color: #555; margin-top: 2px; border-top: 1px dashed #eee; padding-top: 2px;'>💨 {wind_speed:.1f}m/s</div>
         </div>
         """
     
