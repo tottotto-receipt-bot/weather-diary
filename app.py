@@ -103,6 +103,8 @@ def fetch_and_save_data(start_date, end_date, daily_path, hourly_path, is_init=F
                 "wind_speed_10m": data["hourly"].get("wind_speed_10m", 0)
             })
             
+            new_hourly_df["wind_speed_10m"] = new_hourly_df["wind_speed_10m"].rolling(window=3, min_periods=1, center=True).mean()
+
             if not is_init and os.path.exists(hourly_path):
                 old_df = pd.read_parquet(hourly_path)
                 hourly_df = pd.concat([old_df, new_hourly_df]).drop_duplicates(subset=["time"]).sort_values("time").reset_index(drop=True)
@@ -214,8 +216,10 @@ def code_to_emoji(code):
         return "☁️"  # 曇り
     elif code in [51, 53, 55, 61, 63, 65, 80, 81, 82]:
         return "🌧️"  # 雨
+    elif code in [71, 73, 75, 77, 85, 86]:
+        return "❄️"  # 雪・みぞれ
     elif code >= 95:
-        return "⚡"  # 雷
+        return "⛈️"  # 雷・雷雨
     else:
         return "☁️"  # その他
 
@@ -399,19 +403,29 @@ if not day_df.empty:
         emoji = code_to_emoji(row["weather_code"])
         temp = row["temperature_2m"]
         precip = row["precipitation"]
+        if pd.isna(precip):
+            precip = 0.0
+            
         wind_speed = row.get("wind_speed_10m", 0)
         if pd.isna(wind_speed):
             wind_speed = 0
         
-        # 💧 降水量・風速マーク付き
+        if precip > 0.0:
+            precip_str = f"💧{precip}mm"
+        else:
+            precip_str = ""
+        
+        # 💡 朝の6時（hour == 6）のカードに id='morning-card' を付与
+        morning_id_attr = "id='morning-card'" if hour_val == 6 else ""
+        
         cards_html += f"""
-        <div style='flex: 0 0 95px; height: 155px; border: 1px solid #ccc; border-radius: 8px; text-align: center; padding: 4px 2px; background-color: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); font-family: sans-serif;'>
+        <div {morning_id_attr} style='flex: 0 0 95px; height: 155px; border: 1px solid #ccc; border-radius: 8px; text-align: center; padding: 4px 2px; background-color: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); font-family: sans-serif;'>
             <div style='font-size: 22px; font-weight: bold; color: #444;'>{hour_str}</div>
             <div style='font-size: 36px; margin: 2px 0;'>{emoji}</div>
             <div style='font-size: 22px; font-weight: bold; color: #d9534f;'>{temp}°C</div>
-            <div style='font-size: 18px; color: #0275d8; margin-top: 1px;'>💧{precip}mm</div>
+            <div style='font-size: 18px; color: #0275d8; margin-top: 1px; height: 22px;'>{precip_str}</div>
             <div style='font-size: 18px; color: #555; margin-top: 2px; border-top: 1px dashed #eee; padding-top: 2px;'>💨 {wind_speed:.1f}m/s</div>
-        </div>
+        </div>    
         """
     
     scroll_container = f"""
@@ -440,9 +454,19 @@ if not day_df.empty:
     </style>
     </head>
     <body style="margin:0; background-color: transparent;">
-        <div class="scroll-container">
+        <div class="scroll-container" id="hourlyContainer">
             {cards_html}
         </div>
+        <script>
+            window.onload = function() {{
+                const morningCard = document.getElementById('morning-card');
+                const container = document.getElementById('hourlyContainer');
+                if (morningCard && container) {{
+                    const scrollLeftPos = morningCard.offsetLeft - (container.clientWidth / 2) + (morningCard.clientWidth / 2);
+                    container.scrollLeft = scrollLeftPos;
+                }}
+            }};
+        </script>
     </body>
     </html>
     """
